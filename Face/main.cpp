@@ -5,9 +5,38 @@
 #include <QDateTime>
 #include <thread>
 #include <chrono>
+#include <QDir>
+#include <QFileInfo>
 #include <opencv2/opencv.hpp>
 
 using namespace cv;
+
+static QString makeOutputPath(const QString& basePath, const QString& resultTag) {
+    // basePath가 디렉토리면 timestamp 파일명, 아니면 그대로 사용
+    QFileInfo fi(basePath);
+    if (fi.isDir()) {
+        const auto now = QDateTime::currentDateTime();
+        const QString ts = now.toString("yyyyMMdd_hhmmss");
+        return QDir(basePath).filePath(QString("%1_%2.jpg").arg(ts, resultTag));
+    }
+    // 부모 디렉토리가 없으면 생성
+    QDir dir = fi.dir();
+    if (!dir.exists()) dir.mkpath(".");
+    return fi.absoluteFilePath();
+}
+
+static bool saveImage(const cv::Mat& img, const QString& path, QTextStream& out, QTextStream& err) {
+    QFileInfo fi(path);
+    QDir dir = fi.dir();
+    if (!dir.exists() && !dir.mkpath(".")) {
+        err << "[ERR] Cannot create directory: " << dir.absolutePath() << Qt::endl;
+        return false;
+    }
+    const std::string p = fi.absoluteFilePath().toStdString();
+    bool ok = cv::imwrite(p, img);
+    out << "[SAVE] " << fi.absoluteFilePath() << (ok ? "  (ok)" : "  (FAILED)") << Qt::endl;
+    return ok;
+}
 
 static bool loadCascade(CascadeClassifier& cc, const QString& path, const char* name, QTextStream& err) {
     if (path.isEmpty() || !QFileInfo::exists(path)) {
@@ -212,13 +241,26 @@ int main(int argc, char *argv[]) {
         }
 
         const auto now = QDateTime::currentDateTime();
+        // if (detected) {
+        //     out << now.toString("yyyy-MM-dd hh:mm:ss") << "  RESULT: OK" << Qt::endl;
+        //     if (doSave && !annotated.empty()) {
+        //         imwrite(savePath.toStdString(), annotated);
+        //     }
+        // } else {
+        //     out << now.toString("yyyy-MM-dd hh:mm:ss") << "  RESULT: FAIL" << Qt::endl;
+        // }
         if (detected) {
             out << now.toString("yyyy-MM-dd hh:mm:ss") << "  RESULT: OK" << Qt::endl;
-            if (doSave && !annotated.empty()) {
-                imwrite(savePath.toStdString(), annotated);
+            if (p.isSet(saveOpt)) {
+                QString outPath = makeOutputPath(p.value(saveOpt), "OK");
+                saveImage(annotated.empty() ? frame : annotated, outPath, out, err);
             }
         } else {
             out << now.toString("yyyy-MM-dd hh:mm:ss") << "  RESULT: FAIL" << Qt::endl;
+            // if (p.isSet(saveFailOpt)) {
+            //     QString outPath = makeOutputPath(p.value(saveFailOpt), "FAIL");
+            //     saveImage(frame, outPath, out, err);
+            // }
         }
         out.flush();
 
