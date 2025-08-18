@@ -136,7 +136,7 @@ int main(int argc, char *argv[]) {
     // 카메라 파라미터
     QCommandLineOption widthOpt("w", "Capture width.", "W", "640");
     //QCommandLineOption heightOpt("h", "Capture height.", "H", "480");
-    QCommandLineOption heightOpt({"H","height"}, "Capture height.", "H", "480");
+    QCommandLineOption heightOpt("height", "Capture height.", "H", "480");
     QCommandLineOption fpsOpt("fps", "Capture FPS.", "FPS", "30");
     QCommandLineOption warmupOpt("warmup", "Warm-up frames at start.", "N", "5");
 
@@ -146,9 +146,9 @@ int main(int argc, char *argv[]) {
 
     // Cascade 경로
     QCommandLineOption faceOpt("face", "Face cascade path.", "PATH",
-                               "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml");
+                               "/usr/share/opencv4/haarcascades/haarcascade_frontalface_alt2.xml");
     QCommandLineOption eyesOpt("eyes", "Eyes cascade path.", "PATH",
-                               "/usr/share/opencv4/haarcascades/haarcascade_eye.xml");
+                               "/usr/share/opencv4/haarcascades/haarcascade_eye_tree_eyeglasses.xml");
     QCommandLineOption noseOpt("nose", "Nose cascade path.", "PATH",
                                "/usr/share/opencv4/haarcascades/haarcascade_mcs_nose.xml");
     QCommandLineOption mouthOpt("mouth", "Mouth/Smile cascade path.", "PATH",
