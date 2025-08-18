@@ -135,7 +135,8 @@ int main(int argc, char *argv[]) {
 
     // 카메라 파라미터
     QCommandLineOption widthOpt("w", "Capture width.", "W", "640");
-    QCommandLineOption heightOpt("h", "Capture height.", "H", "480");
+    //QCommandLineOption heightOpt("h", "Capture height.", "H", "480");
+    QCommandLineOption heightOpt({"H","height"}, "Capture height.", "H", "480");
     QCommandLineOption fpsOpt("fps", "Capture FPS.", "FPS", "30");
     QCommandLineOption warmupOpt("warmup", "Warm-up frames at start.", "N", "5");
 
@@ -155,7 +156,14 @@ int main(int argc, char *argv[]) {
 
     // 결과 이미지 저장(성공 시 최신 1장만 덮어쓰기)
     QCommandLineOption saveOpt("save", "Save annotated frame on success to this path.", "PATH");
-
+    // 실패했을 때 저장 옵션 (--save-fail)
+    QCommandLineOption saveFailOpt(
+        "save-fail",
+        "Save frame on FAIL cycles (debug). "
+        "If PATH is a directory, file will be timestamped.",
+        "PATH"
+        );
+    p.addOption(saveFailOpt);
     p.addOption(useLibcameraOpt);
     p.addOption(pipelineOpt);
     p.addOption(camIndexOpt);
@@ -257,10 +265,10 @@ int main(int argc, char *argv[]) {
             }
         } else {
             out << now.toString("yyyy-MM-dd hh:mm:ss") << "  RESULT: FAIL" << Qt::endl;
-            // if (p.isSet(saveFailOpt)) {
-            //     QString outPath = makeOutputPath(p.value(saveFailOpt), "FAIL");
-            //     saveImage(frame, outPath, out, err);
-            // }
+            if (p.isSet(saveFailOpt)) {
+                QString outPath = makeOutputPath(p.value(saveFailOpt), "FAIL");
+                saveImage(frame, outPath, out, err);
+            }
         }
         out.flush();
 
