@@ -11,7 +11,41 @@
 #include <QTcpSocket>
 
 using namespace cv;
+static QTcpSocket tcp;
 
+static bool ensureConnected(const QString& host, quint16 port) {
+    if (tcp.state() == QAbstractSocket::ConnectedState) return true;
+    // 끊겨 있으면 재시도
+    if (tcp.state() != QAbstractSocket::UnconnectedState) {
+        tcp.abort(); // 즉시 끊고
+    }
+    tcp.connectToHost(host, port);
+    if (!tcp.waitForConnected(2000)) {
+        qWarning() << "[TCP] connect failed:" << tcp.errorString()
+        << " state=" << tcp.state();
+        return false;
+    }
+    qInfo() << "[TCP] connected to" << host << ":" << port;
+    return true;
+}
+
+// ====== 결과 전송할 때 이렇게 호출 ======
+void sendResult(bool detected) {
+    const QString host = "192.168.1.57";   // 서버의 '실제' IPv4 (0.0.0.0 금지)
+    const quint16 port = 9000;
+
+    if (!ensureConnected(host, port)) return;
+
+    const QByteArray payload = detected ? "1\n" : "0\n";
+    const qint64 n = tcp.write(payload);
+    if (n == -1) {
+        qWarning() << "[TCP] write failed:" << tcp.errorString();
+        tcp.abort(); // 다음 사이클에서 재연결 시도
+        return;
+    }
+    tcp.flush();
+    tcp.waitForBytesWritten(200); // 선택: 즉시 송신 보장
+}
 static QString makeOutputPath(const QString& basePath, const QString& resultTag) {
     // basePath가 디렉토리면 timestamp 파일명, 아니면 그대로 사용
     QFileInfo fi(basePath);
@@ -183,7 +217,6 @@ int main(int argc, char *argv[]) {
 
     QTextStream out(stdout), err(stderr);
 
-    QTcpSocket tcp;
     tcp.connectToHost("192.168.1.57", 9000);   // 수신 서버 IP/포트
     tcp.waitForConnected(2000);
 
@@ -268,18 +301,14 @@ int main(int argc, char *argv[]) {
                 QString outPath = makeOutputPath(p.value(saveOpt), "OK");
                 saveImage(annotated.empty() ? frame : annotated, outPath, out, err);
             }
-            if (tcp.state() == QAbstractSocket::ConnectedState) {
-                tcp.write("1\n"); tcp.flush();
-            }
+            sendResult(true);
         } else {
             out << now.toString("yyyy-MM-dd hh:mm:ss") << "  RESULT: FAIL" << Qt::endl;
             if (p.isSet(saveFailOpt)) {
                 QString outPath = makeOutputPath(p.value(saveFailOpt), "FAIL");
                 saveImage(frame, outPath, out, err);
             }
-            if (tcp.state() == QAbstractSocket::ConnectedState) {
-                tcp.write("0\n"); tcp.flush();
-            }
+            sendResult(false);
         }
         out.flush();
 
