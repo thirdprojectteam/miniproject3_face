@@ -8,7 +8,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <opencv2/opencv.hpp>
-#include <QtWebSockets/QWebSocket>
+#include <QTcpSocket>
 
 using namespace cv;
 
@@ -183,8 +183,9 @@ int main(int argc, char *argv[]) {
 
     QTextStream out(stdout), err(stderr);
 
-    QWebSocket ws;
-    ws.open(QUrl("ws://127.0.0.1:9000"));   // 실제 서버 주소/포트로 교체
+    QTcpSocket tcp;
+    tcp.connectToHost("192.168.0.10", 9000);   // 수신 서버 IP/포트
+    tcp.waitForConnected(2000);
 
     // Cascade 로드
     CascadeClassifier faceCC, eyesCC, noseCC, mouthCC;
@@ -267,21 +268,18 @@ int main(int argc, char *argv[]) {
                 QString outPath = makeOutputPath(p.value(saveOpt), "OK");
                 saveImage(annotated.empty() ? frame : annotated, outPath, out, err);
             }
-            // ✅ WebSocket으로 1 전송
-            if (ws.isValid()) {
-                ws.sendTextMessage("1");
+            if (tcp.state() == QAbstractSocket::ConnectedState) {
+                tcp.write("1\n"); tcp.flush();
             }
-            QCoreApplication::processEvents();
         } else {
             out << now.toString("yyyy-MM-dd hh:mm:ss") << "  RESULT: FAIL" << Qt::endl;
             if (p.isSet(saveFailOpt)) {
                 QString outPath = makeOutputPath(p.value(saveFailOpt), "FAIL");
                 saveImage(frame, outPath, out, err);
             }
-            if (ws.isValid()) {
-                ws.sendTextMessage("0");
+            if (tcp.state() == QAbstractSocket::ConnectedState) {
+                tcp.write("0\n"); tcp.flush();
             }
-            QCoreApplication::processEvents();
         }
         out.flush();
 
