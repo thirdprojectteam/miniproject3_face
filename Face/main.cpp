@@ -184,7 +184,7 @@ int main(int argc, char *argv[]) {
     QTextStream out(stdout), err(stderr);
 
     QTcpSocket tcp;
-    tcp.connectToHost("192.168.0.10", 9000);   // 수신 서버 IP/포트
+    tcp.connectToHost("192.168.1.57", 9000);   // 수신 서버 IP/포트
     tcp.waitForConnected(2000);
 
     // Cascade 로드
