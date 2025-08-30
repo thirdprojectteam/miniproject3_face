@@ -261,8 +261,8 @@ int main(int argc, char *argv[]) {
         "PATH"
         );
     // yang 모델 경로/ 임계값
-    QCommandLineOption ageProtoOpt("age-proto", "Caffe age deploy prototxt path.", "PATH");
-    QCommandLineOption ageModelOpt("age-model", "Caffe age caffemodel path.", "PATH");
+    QCommandLineOption ageProtoOpt("age-proto", "Caffe age deploy prototxt path.", "PATH","/home/kosa/models/age_deploy.prototxt");
+    QCommandLineOption ageModelOpt("age-model", "Caffe age caffemodel path.", "PATH","/home/kosa/models/age_net.caffemodel");
     QCommandLineOption ageThreshOpt("age-threshold", "Age threshold (>= this → OK).", "N", "50");
 
     p.addOption(saveFailOpt);
