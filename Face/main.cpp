@@ -449,9 +449,10 @@ int main(int argc, char *argv[]) {
                     Rect safe = faceRect & imgBounds;
                     if (safe.width > 0 && safe.height > 0) {
                         Mat faceROI = frame(safe).clone();
-                        float expAge=0.f, conf=0.f; int idx=0;
+
                         if (estimateAge(faceROI, ageNet, expAge, idx, conf)) {
                             // 디버그 출력
+                            hasAge=true;
                             out << "[RESULT] MASK=OK, [AGE]= " << AGE_BUCKETS[idx].c_str()
                                 << " (~" << (int)std::lround(expAge)
                                 << ")  conf=" << QString::number(conf,'f',2)
