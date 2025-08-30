@@ -9,9 +9,22 @@
 #include <QFileInfo>
 #include <opencv2/opencv.hpp>
 #include <QTcpSocket>
+#include <opencv2/dnn.hpp>
+#include <cmath>
 
 using namespace cv;
+using namespace cv::dnn;
 static QTcpSocket tcp;
+
+// 나이 버킷과 중간값(기대나이 계산용)
+static const std::vector<std::string> AGE_BUCKETS = {
+    "(0-2)","(4-6)","(8-12)","(15-20)","(25-32)","(38-43)","(48-53)","(60-100)"
+};
+static const std::vector<float> AGE_MIDPOINTS = {
+    1.f, 5.f, 10.f, 18.f, 28.5f, 40.5f, 50.5f, 80.f
+};
+// Caffe age-net 평균값 (BGR)
+static const Scalar AGE_MODEL_MEAN(78.4263, 87.7689, 114.8958);
 
 static bool ensureConnected(const QString& host, quint16 port) {
     if (tcp.state() == QAbstractSocket::ConnectedState) return true;
@@ -90,7 +103,8 @@ static bool detectEyesNoseMouth(const Mat& bgr,
                                 CascadeClassifier& eyesCC,
                                 CascadeClassifier& noseCC,
                                 CascadeClassifier& mouthCC,
-                                Mat* annotatedOut = nullptr)
+                                Mat* annotatedOut = nullptr,
+                                Rect* faceRectOut = nullptr)
 {
     Mat gray;
     cvtColor(bgr, gray, COLOR_BGR2GRAY);
@@ -147,10 +161,58 @@ static bool detectEyesNoseMouth(const Mat& bgr,
                 }
                 *annotatedOut = std::move(vis);
             }
+            //추가됨.
+            if(faceRectOut) *faceRectOut = f;
             return true;
         }
     }
     return false;
+}
+
+//나이값 로더 추가
+static bool loadAgeNet(Net& net, const QString& proto, const QString& model, QTextStream& err) {
+    if (proto.isEmpty() || !QFileInfo::exists(proto)) {
+        err << "[ERR] age-proto not found: " << proto << Qt::endl;
+        return false;
+    }
+    if (model.isEmpty() || !QFileInfo::exists(model)) {
+        err << "[ERR] age-model not found: " << model << Qt::endl;
+        return false;
+    }
+    net = readNetFromCaffe(proto.toStdString(), model.toStdString());
+    if (net.empty()) {
+        err << "[ERR] failed to load age net" << Qt::endl;
+        return false;
+    }
+    net.setPreferableBackend(DNN_BACKEND_OPENCV);
+    net.setPreferableTarget(DNN_TARGET_CPU);
+    return true;
+}
+
+// 얼굴 ROI(bgr)로 기대나이/버킷/신뢰도 계산
+static bool estimateAge(const Mat& faceBGR, Net& ageNet,
+                        float& expectedAge, int& bucketIdx, float& conf)
+{
+    // 모델 입력 크기: 227x227, BGR 평균값 적용
+    Mat blob = blobFromImage(faceBGR, 1.0, Size(227,227), AGE_MODEL_MEAN, false, false);
+    ageNet.setInput(blob);
+    Mat prob = ageNet.forward();   // 1x8
+
+    Mat row = prob.reshape(1,1);
+    double s = cv::sum(row)[0];
+    if (s > 0) row /= s;
+
+    Point classId;
+    double maxProb;
+    minMaxLoc(row, nullptr, &maxProb, nullptr, &classId);
+    bucketIdx = classId.x;
+    conf = static_cast<float>(maxProb);
+
+    expectedAge = 0.f;
+    for (int i=0; i<(int)AGE_BUCKETS.size(); ++i) {
+        expectedAge += row.at<float>(0,i) * AGE_MIDPOINTS[i];
+    }
+    return true;
 }
 
 int main(int argc, char *argv[]) {
@@ -198,6 +260,11 @@ int main(int argc, char *argv[]) {
         "If PATH is a directory, file will be timestamped.",
         "PATH"
         );
+    // yang 모델 경로/ 임계값
+    QCommandLineOption ageProtoOpt("age-proto", "Caffe age deploy prototxt path.", "PATH");
+    QCommandLineOption ageModelOpt("age-model", "Caffe age caffemodel path.", "PATH");
+    QCommandLineOption ageThreshOpt("age-threshold", "Age threshold (>= this → OK).", "N", "50");
+
     p.addOption(saveFailOpt);
     p.addOption(useLibcameraOpt);
     p.addOption(pipelineOpt);
@@ -213,6 +280,11 @@ int main(int argc, char *argv[]) {
     p.addOption(noseOpt);
     p.addOption(mouthOpt);
     p.addOption(saveOpt);
+    // 추가됨 age
+    p.addOption(ageProtoOpt);
+    p.addOption(ageModelOpt);
+    p.addOption(ageThreshOpt);
+
     p.process(app);
 
     QTextStream out(stdout), err(stderr);
@@ -226,6 +298,21 @@ int main(int argc, char *argv[]) {
     if (!loadCascade(eyesCC, p.value(eyesOpt),  "eyes",  err))  return 1;
     if (!loadCascade(noseCC, p.value(noseOpt),  "nose",  err))  return 1;
     if (!loadCascade(mouthCC, p.value(mouthOpt), "mouth", err)) return 1;
+
+    // ---- (카메라 열고 워밍업 전) Age Net 로드 ----
+    Net ageNet;
+    bool useAge = false;
+    float ageThreshold = p.value(ageThreshOpt).toFloat();   // 기본 50
+    if (p.isSet(ageProtoOpt) && p.isSet(ageModelOpt)) {
+        if (loadAgeNet(ageNet, p.value(ageProtoOpt), p.value(ageModelOpt), err)) {
+            useAge = true;
+            out << "[INFO] AgeNet loaded. threshold=" << ageThreshold << Qt::endl;
+        } else {
+            out << "[WARN] AgeNet not loaded. Age condition disabled." << Qt::endl;
+        }
+    } else {
+        out << "[WARN] --age-proto/--age-model not provided. Age condition disabled." << Qt::endl;
+    }
 
     // 카메라 열기
     int W = p.value(widthOpt).toInt();
@@ -272,16 +359,73 @@ int main(int argc, char *argv[]) {
         const auto cycleStart = std::chrono::steady_clock::now();
         bool detected = false;
         Mat annotated;
-
+        // 추가됨
+        Rect faceRect;
         // windowSec 동안 여러 프레임 검사
         const int64 t0 = cv::getTickCount();
         const double freq = cv::getTickFrequency();
         while (((cv::getTickCount() - t0) / freq) < windowSec) {
             if (!cap.read(frame) || frame.empty()) continue;
-            if (detectEyesNoseMouth(frame, faceCC, eyesCC, noseCC, mouthCC, doSave ? &annotated : nullptr)) {
-                detected = true;
-                break;
+            // if (detectEyesNoseMouth(frame, faceCC, eyesCC, noseCC, mouthCC, doSave ? &annotated : nullptr)) {
+            //     detected = true;
+            //     break;
+            // }
+            //detect 판정 들어간다.
+            bool partsOK = detectEyesNoseMouth(frame, faceCC, eyesCC, noseCC, mouthCC,
+                                               (p.isSet(saveOpt) ? &annotated : nullptr),
+                                               &faceRect);
+
+            if (partsOK) {
+                if (useAge) {
+                    // 얼굴 ROI 추출 (경계보정)
+                    Rect imgBounds(0,0,frame.cols, frame.rows);
+                    Rect safe = faceRect & imgBounds;
+                    if (safe.width > 0 && safe.height > 0) {
+                        Mat faceROI = frame(safe).clone();
+                        float expAge=0.f, conf=0.f; int idx=0;
+                        if (estimateAge(faceROI, ageNet, expAge, idx, conf)) {
+                            // 디버그 출력
+                            out << "[AGE] " << AGE_BUCKETS[idx].c_str()
+                                << " ~" << (int)std::lround(expAge)
+                                << "  conf=" << QString::number(conf,'f',2)
+                                << Qt::endl;
+
+                            // 시각화 라벨(옵션)
+                            if (!annotated.empty()) {
+                                char label[128];
+                                std::snprintf(label, sizeof(label),
+                                              "Age %s (%.0f) conf=%.2f",
+                                              AGE_BUCKETS[idx].c_str(), expAge, conf);
+                                int base=0;
+                                Size sz = getTextSize(label, FONT_HERSHEY_SIMPLEX, 0.6, 2, &base);
+                                int y = std::max(safe.y-10, sz.height+10);
+                                rectangle(annotated,
+                                          Point(safe.x, y - sz.height - 10),
+                                          Point(safe.x + sz.width + 10, y + base - 5),
+                                          Scalar(0,0,0), FILLED);
+                                putText(annotated, label, Point(safe.x+5, y-5),
+                                        FONT_HERSHEY_SIMPLEX, 0.6, Scalar(255,255,255), 2);
+                                if (expAge >= ageThreshold) {
+                                    rectangle(annotated, safe, Scalar(0,0,255), 3);
+                                }
+                            }
+
+                            // 최종 판정: 눈코입 OK && 나이 조건(>=threshold)
+                            if (expAge >= ageThreshold) {
+                                detected = true;
+                                break;
+                            } else {
+                                // 눈코입 OK여도 나이 미만이면 계속 탐색
+                            }
+                        }
+                    }
+                } else {
+                    // AgeNet 비활성화면 기존 로직과 동일하게 눈코입 OK만으로 성공 처리
+                    detected = true;
+                    break;
+                }
             }
+
             // 너무 바쁘면 살짝 쉼(라즈베리파이 CPU 배려)
             cv::waitKey(1);
         }
