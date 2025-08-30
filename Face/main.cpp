@@ -300,7 +300,7 @@ int main(int argc, char *argv[]) {
                                 "/usr/share/opencv4/haarcascades/haarcascade_smile.xml");
 
     // 결과 이미지 저장(성공 시 최신 1장만 덮어쓰기)
-    QCommandLineOption saveOpt("save", "Save annotated frame on success to this path.", "PATH");
+    QCommandLineOption saveOpt("save", "Save annotated frame on success to this path.", "PATH",".");
     // 실패했을 때 저장 옵션 (--save-fail)
     QCommandLineOption saveFailOpt(
         "save-fail",
@@ -406,8 +406,10 @@ int main(int argc, char *argv[]) {
 
     const int intervalSec = std::max(1, p.value(intervalOpt).toInt()); // 기본 5
     const double windowSec = std::max(0.2, p.value(windowOpt).toDouble()); // 기본 2.0
-    const bool doSave = p.isSet(saveOpt);
+    //savePath
     const QString savePath = p.value(saveOpt);
+    const bool doSave = !savePath.isEmpty();
+
 
     out << "[INFO] Started monitoring. interval=" << intervalSec
         << "s, window=" << windowSec << "s. Press Ctrl+C to stop." << Qt::endl;
@@ -463,7 +465,7 @@ int main(int argc, char *argv[]) {
 
                 // 화면 표기 이미지 대상 선택
                 Mat& vis = (annotated.empty() ? frame : annotated);
-                drawStatusOverlay(vis, faceRet, /*maskOK*/true,
+                drawStatusOverlay(vis, faceRect, /*maskOK*/true,
                                   hasAge, expAge, idx, conf,
                                   ageThreshold);
 
