@@ -215,6 +215,54 @@ static bool estimateAge(const Mat& faceBGR, Net& ageNet,
     return true;
 }
 
+// 추가된 status overlay
+static void drawStatusOverlay(cv::Mat& img, const cv::Rect& face,
+                              bool maskOK,
+                              bool hasAge, float expAge, int ageBucket, float conf,
+                              float ageThreshold)
+{
+    // 박스 색상: 마스크 OK면 초록, 아니면 빨강
+    Scalar boxColor = maskOK ? Scalar(0,255,0) : Scalar(0,0,255);
+    rectangle(img, face, boxColor, 2);
+
+    // 라벨 텍스트 구성
+    char line1[128];  // 마스크 상태
+    snprintf(line1, sizeof(line1), "MASK: %s", maskOK ? "OK" : "FAIL");
+
+    char line2[128] = {0}; // 나이 결과
+    if (hasAge) {
+        // AGE_BUCKETS, expAge, conf 사용
+        snprintf(line2, sizeof(line2), "AGE: %s (~%.0f) conf=%.2f",
+                 AGE_BUCKETS[ageBucket].c_str(), expAge, conf);
+    } else {
+        snprintf(line2, sizeof(line2), "AGE: N/A");
+    }
+
+    // 라벨 영역 배경 박스
+    int base=0;
+    Size s1 = getTextSize(line1, FONT_HERSHEY_SIMPLEX, 0.6, 2, &base);
+    Size s2 = getTextSize(line2, FONT_HERSHEY_SIMPLEX, 0.6, 2, &base);
+    int w = std::max(s1.width, s2.width) + 16;
+    int h = s1.height + s2.height + 22;
+
+    int y = std::max(face.y - 12, h + 5);
+    rectangle(img,
+              Point(face.x, y - h),
+              Point(face.x + w, y),
+              Scalar(0,0,0), FILLED);
+
+    // 텍스트 그리기
+    putText(img, line1, Point(face.x + 8, y - h/2 - 4),
+            FONT_HERSHEY_SIMPLEX, 0.6, Scalar(255,255,255), 2);
+    putText(img, line2, Point(face.x + 8, y - 6),
+            FONT_HERSHEY_SIMPLEX, 0.6, Scalar(255,255,255), 2);
+
+    // 나이 임계 이상이면 얼굴 테두리에 추가 강조(파란 테두리)
+    if (hasAge && expAge >= ageThreshold) {
+        rectangle(img, face, Scalar(255,0,0), 2);
+    }
+}
+
 int main(int argc, char *argv[]) {
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName("rpi_facial_parts_monitor");
@@ -386,6 +434,13 @@ int main(int argc, char *argv[]) {
                                                &faceRect);
 
             if (partsOK) {
+                // 기본은 마스크 OK
+                detected = true;
+
+                bool hasAge = false;
+                float expAge = 0.f, conf = 0.f;
+                int   idx = 0;
+
                 if (useAge) {
                     // 얼굴 ROI 추출 (경계보정)
                     Rect imgBounds(0,0,frame.cols, frame.rows);
@@ -395,47 +450,25 @@ int main(int argc, char *argv[]) {
                         float expAge=0.f, conf=0.f; int idx=0;
                         if (estimateAge(faceROI, ageNet, expAge, idx, conf)) {
                             // 디버그 출력
-                            out << "[AGE] " << AGE_BUCKETS[idx].c_str()
-                                << " ~" << (int)std::lround(expAge)
-                                << "  conf=" << QString::number(conf,'f',2)
+                            out << "[RESULT] MASK=OK, [AGE]= " << AGE_BUCKETS[idx].c_str()
+                                << " (~" << (int)std::lround(expAge)
+                                << ")  conf=" << QString::number(conf,'f',2)
                                 << Qt::endl;
-
-                            // 시각화 라벨(옵션)
-                            if (!annotated.empty()) {
-                                char label[128];
-                                std::snprintf(label, sizeof(label),
-                                              "Age %s (%.0f) conf=%.2f",
-                                              AGE_BUCKETS[idx].c_str(), expAge, conf);
-                                int base=0;
-                                Size sz = getTextSize(label, FONT_HERSHEY_SIMPLEX, 0.6, 2, &base);
-                                int y = std::max(safe.y-10, sz.height+10);
-                                rectangle(annotated,
-                                          Point(safe.x, y - sz.height - 10),
-                                          Point(safe.x + sz.width + 10, y + base - 5),
-                                          Scalar(0,0,0), FILLED);
-                                putText(annotated, label, Point(safe.x+5, y-5),
-                                        FONT_HERSHEY_SIMPLEX, 0.6, Scalar(255,255,255), 2);
-                                if (expAge >= ageThreshold) {
-                                    rectangle(annotated, safe, Scalar(0,0,255), 3);
-                                }
-                            }
-
-                            // 최종 판정: 눈코입 OK && 나이 조건(>=threshold)
-                            if (expAge >= ageThreshold) {
-                                detected = true;
-                                break;
-                            } else {
-                                // 눈코입 OK여도 나이 미만이면 계속 탐색
-                            }
                         }
                     }
                 } else {
                     // AgeNet 비활성화면 기존 로직과 동일하게 눈코입 OK만으로 성공 처리
-                    detected = true;
-                    break;
+                    out << "[RESULT] MASK=OK, AGE=N/A" << Qt::endl;
                 }
-            }
 
+                // 화면 표기 이미지 대상 선택
+                Mat& vis = (annotated.empty() ? frame : annotated);
+                drawStatusOverlay(vis, faceRet, /*maskOK*/true,
+                                  hasAge, expAge, idx, conf,
+                                  ageThreshold);
+
+                break;
+            }
             // 너무 바쁘면 살짝 쉼(라즈베리파이 CPU 배려)
             cv::waitKey(1);
         }
@@ -451,8 +484,8 @@ int main(int argc, char *argv[]) {
         // }
         if (detected) {
             out << now.toString("yyyy-MM-dd hh:mm:ss") << "  RESULT: OK" << Qt::endl;
-            if (p.isSet(saveOpt)) {
-                QString outPath = makeOutputPath(p.value(saveOpt), "OK");
+            if (doSave) {
+                QString outPath = makeOutputPath(savePath, "OK");
                 saveImage(annotated.empty() ? frame : annotated, outPath, out, err);
             }
             sendResult(true);
