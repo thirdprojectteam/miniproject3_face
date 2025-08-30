@@ -303,8 +303,18 @@ int main(int argc, char *argv[]) {
     Net ageNet;
     bool useAge = false;
     float ageThreshold = p.value(ageThreshOpt).toFloat();   // 기본 50
-    if (p.isSet(ageProtoOpt) && p.isSet(ageModelOpt)) {
-        if (loadAgeNet(ageNet, p.value(ageProtoOpt), p.value(ageModelOpt), err)) {
+
+    // 추가됨 for ageproto
+    const QString ageProtoPath = p.value(ageProtoOpt);   // 기본값/인자 모두 반영됨
+    const QString ageModelPath = p.value(ageModelOpt);
+
+    if (!ageProtoPath.isEmpty() && !ageModelPath.isEmpty()) {
+        out << "[INFO] age-proto=" << ageProtoPath << Qt::endl;
+        out << "[INFO] age-model=" << ageModelPath << Qt::endl;
+
+    // if (p.isSet(ageProtoOpt) && p.isSet(ageModelOpt)) {
+    //    if (loadAgeNet(ageNet, p.value(ageProtoOpt), p.value(ageModelOpt), err)) {
+        if (loadAgeNet(ageNet, ageProtoPath, ageModelPath, err)) {
             useAge = true;
             out << "[INFO] AgeNet loaded. threshold=" << ageThreshold << Qt::endl;
         } else {
