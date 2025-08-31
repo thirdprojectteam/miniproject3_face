@@ -43,22 +43,28 @@ static bool ensureConnected(const QString& host, quint16 port) {
 }
 
 // ====== 결과 전송할 때 이렇게 호출 ======
-void sendResult(bool detected) {
-    const QString host = "192.168.2.49";   // 서버의 '실제' IPv4 (0.0.0.0 금지)
+static void sendResultWithAge(bool maskOK, bool hasAge, float expAge, int ageBucket, float conf, float ageThreshold)
+{
+    const QString host = "192.168.2.49";   // ← 네가 쓰는 호스트와 동일하게
     const quint16 port = 9000;
 
     if (!ensureConnected(host, port)) return;
 
-    const QByteArray payload = detected ? "1\n" : "0\n";
-    const qint64 n = tcp.write(payload);
-    if (n == -1) {
+    // 레이블: threshold 기준으로 elder/young, 없으면 unknown
+    const char* ageLabel = hasAge ? ((expAge >= ageThreshold) ? "elder" : "young") : "unknown";
+
+    // "1,elder\n" 또는 "0,unknown\n"
+    QByteArray payload = QByteArray::asprintf("%d,%s\n", maskOK ? 1 : 0, ageLabel);
+
+    if (tcp.write(payload) == -1) {
         qWarning() << "[TCP] write failed:" << tcp.errorString();
-        tcp.abort(); // 다음 사이클에서 재연결 시도
+        tcp.abort();
         return;
     }
     tcp.flush();
-    tcp.waitForBytesWritten(200); // 선택: 즉시 송신 보장
+    tcp.waitForBytesWritten(200);
 }
+
 static QString makeOutputPath(const QString& basePath, const QString& resultTag) {
     // basePath가 디렉토리면 timestamp 파일명, 아니면 그대로 사용
     QFileInfo fi(basePath);
@@ -311,7 +317,7 @@ int main(int argc, char *argv[]) {
     // yang 모델 경로/ 임계값
     QCommandLineOption ageProtoOpt("age-proto", "Caffe age deploy prototxt path.", "PATH","/home/kosa/models/age_deploy.prototxt");
     QCommandLineOption ageModelOpt("age-model", "Caffe age caffemodel path.", "PATH","/home/kosa/models/age_net.caffemodel");
-    QCommandLineOption ageThreshOpt("age-threshold", "Age threshold (>= this → OK).", "N", "50");
+    QCommandLineOption ageThreshOpt("age-threshold", "Age threshold (>= this → OK).", "N", "40");
 
     p.addOption(saveFailOpt);
     p.addOption(useLibcameraOpt);
@@ -491,14 +497,14 @@ int main(int argc, char *argv[]) {
                 QString outPath = makeOutputPath(savePath, "OK");
                 saveImage(annotated.empty() ? frame : annotated, outPath, out, err);
             }
-            sendResult(true);
+            sendResultWithAge(/*maskOK*/true, hasAge, expAge, idx, conf, ageThreshold);
         } else {
             out << now.toString("yyyy-MM-dd hh:mm:ss") << "  RESULT: FAIL" << Qt::endl;
             if (p.isSet(saveFailOpt)) {
                 QString outPath = makeOutputPath(p.value(saveFailOpt), "FAIL");
                 saveImage(frame, outPath, out, err);
             }
-            sendResult(false);
+            sendResultWithAge(/*maskOK*/false, /*hasAge*/false, /*expAge*/0.f, /*idx*/0, /*conf*/0.f, ageThreshold);
         }
         out.flush();
 
