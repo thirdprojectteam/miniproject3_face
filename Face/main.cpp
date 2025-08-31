@@ -44,7 +44,7 @@ static bool ensureConnected(const QString& host, quint16 port) {
 
 // ====== 결과 전송할 때 이렇게 호출 ======
 void sendResult(bool detected) {
-    const QString host = "192.168.1.57";   // 서버의 '실제' IPv4 (0.0.0.0 금지)
+    const QString host = "192.168.2.49";   // 서버의 '실제' IPv4 (0.0.0.0 금지)
     const quint16 port = 9000;
 
     if (!ensureConnected(host, port)) return;
@@ -232,8 +232,8 @@ static void drawStatusOverlay(cv::Mat& img, const cv::Rect& face,
     char line2[128] = {0}; // 나이 결과
     if (hasAge) {
         // AGE_BUCKETS, expAge, conf 사용
-        snprintf(line2, sizeof(line2), "AGE: %s (~%.0f) conf=%.2f",
-                 AGE_BUCKETS[ageBucket].c_str(), expAge, conf);
+        snprintf(line2, sizeof(line2), "AGE: %s",
+                 ageBucket<4?"young":"elder");
     } else {
         snprintf(line2, sizeof(line2), "AGE: N/A");
     }
