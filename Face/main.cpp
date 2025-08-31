@@ -53,8 +53,9 @@ static void sendResultWithAge(bool maskOK, bool hasAge, float expAge, int ageBuc
     // 레이블: threshold 기준으로 elder/young, 없으면 unknown
     const char* ageLabel = hasAge ? ((expAge >= ageThreshold) ? "elder" : "young") : "unknown";
 
+    QString msg = QString("%1,%2\n").arg(maskOK?1:0).arg(ageLabel);
     // "1,elder\n" 또는 "0,unknown\n"
-    QByteArray payload = QByteArray::asprintf("%d,%s\n", maskOK ? 1 : 0, ageLabel);
+    QByteArray payload = msg.toUtf8();
 
     if (tcp.write(payload) == -1) {
         qWarning() << "[TCP] write failed:" << tcp.errorString();
@@ -430,6 +431,11 @@ int main(int argc, char *argv[]) {
         // windowSec 동안 여러 프레임 검사
         const int64 t0 = cv::getTickCount();
         const double freq = cv::getTickFrequency();
+
+        bool hasAge = false;
+        float expAge = 0.f, conf = 0.f;
+        int   idx = 0;
+
         while (((cv::getTickCount() - t0) / freq) < windowSec) {
             if (!cap.read(frame) || frame.empty()) continue;
             // if (detectEyesNoseMouth(frame, faceCC, eyesCC, noseCC, mouthCC, doSave ? &annotated : nullptr)) {
@@ -445,9 +451,9 @@ int main(int argc, char *argv[]) {
                 // 기본은 마스크 OK
                 detected = true;
 
-                bool hasAge = false;
-                float expAge = 0.f, conf = 0.f;
-                int   idx = 0;
+//                bool hasAge = false;
+//                float expAge = 0.f, conf = 0.f;
+//                int   idx = 0;
 
                 if (useAge) {
                     // 얼굴 ROI 추출 (경계보정)
